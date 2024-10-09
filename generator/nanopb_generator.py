@@ -34,8 +34,8 @@ try:
     import google.protobuf.text_format as text_format
     import google.protobuf.descriptor_pb2 as descriptor
     import google.protobuf.compiler.plugin_pb2 as plugin_pb2
-    import google.protobuf.reflection as reflection
     import google.protobuf.descriptor
+    import google.protobuf.message_factory as message_factory
 except:
     sys.stderr.write('''
          **********************************************************************
@@ -46,6 +46,15 @@ except:
          **********************************************************************
     ''' + '\n')
     raise
+
+# GetMessageClass() is used by modern python-protobuf (around 5.x onwards)
+# Retain compatibility with older python-protobuf versions.
+try:
+    import google.protobuf.message_factory as message_factory
+    GetMessageClass = message_factory.GetMessageClass
+except AttributeError:
+    import google.protobuf.reflection as reflection
+    GetMessageClass = reflection.MakeClass
 
 # Depending on how this script is run, we may or may not have PEP366 package name
 # available for relative imports.
@@ -194,27 +203,12 @@ class Globals:
     protoc_insertion_points = False
     naming_style = NamingStyle()
 
-# String types and file encoding for Python2 UTF-8 support
-if sys.version_info.major == 2:
-    import codecs
-    open = codecs.open
-    strtypes = (unicode, str)
-
-    def str(x):
-        try:
-            return strtypes[1](x)
-        except UnicodeEncodeError:
-            return strtypes[0](x)
-else:
-    strtypes = (str, )
-
-
 class Names:
     '''Keeps a set of nested names and formats them to C identifier.'''
     def __init__(self, parts = ()):
         if isinstance(parts, Names):
             parts = parts.parts
-        elif isinstance(parts, strtypes):
+        elif isinstance(parts, str):
             parts = (parts,)
         self.parts = tuple(parts)
 
@@ -228,7 +222,7 @@ class Names:
         return 'Names(%s)' % ','.join("'%s'" % x for x in self.parts)
 
     def __add__(self, other):
-        if isinstance(other, strtypes):
+        if isinstance(other, str):
             return Names(self.parts + (other,))
         elif isinstance(other, Names):
             return Names(self.parts + other.parts)
@@ -274,7 +268,7 @@ class EncodedSize:
             self.symbols = value.symbols
             self.declarations = value.declarations
             self.required_defines = value.required_defines
-        elif isinstance(value, strtypes + (Names,)):
+        elif isinstance(value, (str, Names)):
             self.symbols = [str(value)]
             self.value = 0
             self.declarations = []
@@ -288,7 +282,7 @@ class EncodedSize:
     def __add__(self, other):
         if isinstance(other, int):
             return EncodedSize(self.value + other, self.symbols, self.declarations, self.required_defines)
-        elif isinstance(other, strtypes + (Names,)):
+        elif isinstance(other, (str, Names)):
             return EncodedSize(self.value, self.symbols + [str(other)], self.declarations, self.required_defines + [str(other)])
         elif isinstance(other, EncodedSize):
             return EncodedSize(self.value + other.value, self.symbols + other.symbols,
@@ -1689,7 +1683,7 @@ class Message(ProtoElement):
         optional_only.name += str(id(self))
 
         desc = google.protobuf.descriptor.MakeDescriptor(optional_only)
-        msg = reflection.MakeClass(desc)()
+        msg = GetMessageClass(desc)()
 
         for field in optional_only.field:
             if field.type == FieldD.TYPE_STRING:
